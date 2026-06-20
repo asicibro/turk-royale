@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Türk Royale</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; touch-action: manipulation; -webkit-user-select:none; user-select:none; }
+  body { font-family: Arial, sans-serif; background:#1a1a2e; color:#fff; overflow:hidden; height:100vh; }
+
+  #menu { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:15px; padding:20px; }
+  #menu h1 { font-size:32px; margin-bottom:10px; }
+  #menu input { padding:14px; font-size:18px; width:220px; text-align:center; border-radius:8px; border:none; }
+  #menu button { padding:14px 28px; font-size:18px; border-radius:8px; border:none; background:#e94560; color:#fff; font-weight:bold; }
+  #roomCodeDisplay { font-size:30px; font-weight:bold; letter-spacing:5px; background:#0f3460; padding:12px 24px; border-radius:8px; }
+  #status { font-size:14px; color:#aaa; }
+
+  #game { display:none; position:relative; width:100vw; height:100vh; background:linear-gradient(to bottom, #2d5016 0%, #3a6b1f 50%, #2d5016 100%); }
+
+  #topBar { position:absolute; top:0; width:100%; display:flex; justify-content:space-between; padding:8px 12px; background:rgba(0,0,0,0.4); z-index:10; }
+  .towerInfo { font-size:14px; }
+  .hpBar { width:80px; height:8px; background:#333; border-radius:4px; overflow:hidden; margin-top:2px; }
+  .hpFill { height:100%; background:#e94560; transition: width 0.2s; }
+  #timer { font-size:18px; font-weight:bold; }
+
+  #battlefield { position:absolute; top:50px; bottom:160px; width:100%; }
+  .unit { position:absolute; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; transform:translate(-50%,-50%); border:2px solid #fff; }
+  .unit.mine { background:#0f3460; }
+  .unit.theirs { background:#e94560; }
+  .unitHpBar { position:absolute; top:-8px; left:0; width:100%; height:3px; background:#333; }
+  .unitHpFill { height:100%; background:#4caf50; }
+
+  #handArea { position:absolute; bottom:0; width:100%; background:rgba(0,0,0,0.6); padding:10px; display:flex; flex-direction:column; gap:8px; }
+  #elixirBarWrap { width:100%; height:14px; background:#222; border-radius:7px; overflow:hidden; }
+  #elixirBarFill { height:100%; background:#9c27b0; transition: width 0.3s; }
+  #elixirLabel { font-size:12px; text-align:center; }
+  #hand { display:flex; gap:8px; justify-content:center; }
+  .card { width:60px; height:80px; background:#0f3460; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:24px; border:2px solid #444; position:relative; }
+  .card.selected { border-color:#e94560; transform:scale(1.1); }
+  .card.disabled { opacity:0.4; }
+  .cardCost { position:absolute; bottom:2px; right:4px; font-size:11px; background:#9c27b0; border-radius:50%; width:18px; height:18px; display:flex; align-items:center; justify-content:center; }
+  .cardName { font-size:9px; margin-top:2px; }
+
+  #gameOverScreen { display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); flex-direction:column; align-items:center; justify-content:center; gap:15px; z-index:20; }
+  #gameOverScreen h2 { font-size:32px; }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>⚔️ Türk Royale ⚔️</h1>
+  <button onclick="createRoom()">Oda Kur</button>
+  <div id="status"></div>
+  <hr style="width:100%;opacity:0.2;border:none;border-top:1px solid #555;">
+  <input id="joinInput" placeholder="Oda Kodu Gir" maxlength="4">
+  <button onclick="joinRoom()">Odaya Katıl</button>
+  <div id="roomCodeBox" style="display:none; text-align:center;">
+    <p>Oda Kodun:</p>
+    <div id="roomCodeDisplay"></div>
+    <p style="font-size:13px;color:#aaa;margin-top:10px;">Bu kodu arkadaşına gönder</p>
+  </div>
+</div>
+
+<div id="game">
+  <div id="topBar">
+    <div class="towerInfo">
+      <div>Rakip Kale</div>
+      <div class="hpBar"><div id="enemyHpFill" class="hpFill" style="width:100%"></div></div>
+    </div>
+    <div id="timer">3:00</div>
+    <div class="towerInfo" style="text-align:right;">
+      <div>Senin Kalen</div>
+      <div class="hpBar"><div id="myHpFill" class="hpFill" style="width:100%"></div></div>
+    </div>
+  </div>
+
+  <div id="battlefield"></div>
+
+  <div id="handArea">
+    <div id="elixirBarWrap"><div id="elixirBarFill" style="width:50%"></div></div>
+    <div id="elixirLabel">İksir: 5/10</div>
+    <div id="hand"></div>
+  </div>
+
+  <div id="gameOverScreen">
+    <h2 id="gameOverText"></h2>
+    <button onclick="location.reload()" style="padding:14px 28px;font-size:18px;border-radius:8px;border:none;background:#e94560;color:#fff;">Tekrar Oyna</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+const socket = io();
+let myId = null;
+let opponentId = null;
+let myHand = [];
+let cardDefs = {};
+let selectedCard = null;
+let roomCode = null;
+
+const CARD_EMOJI = {
+  yenicieri: '🗡️', kopek: '🐕', kedi: '🐈', kartal: '🦅',
+  okcu: '🏹', robot: '🤖', kale: '🏰', ciftci: '🌾'
+};
+
+function createRoom() {
+  socket.emit('createRoom');
+  document.getElementById('status').textContent = 'Oda oluşturuluyor...';
+}
+
+function joinRoom() {
+  const code = document.getElementById('joinInput').value.trim().toUpperCase();
+  if (code.length === 4) socket.emit('joinRoom', code);
+}
+
+socket.on('roomCreated', (data) => {
+  roomCode = data.code;
+  document.getElementById('roomCodeBox').style.display = 'block';
+  document.getElementById('roomCodeDisplay').textContent = data.code;
+  document.getElementById('status').textContent = 'Eşleşme bekleniyor...';
+});
+
+socket.on('errorMsg', (msg) => {
+  document.getElementById('status').textContent = msg;
+});
+
+socket.on('gameStart', (data) => {
+  myId = data.you;
+  opponentId = data.opponent;
+  myHand = data.hand;
+  cardDefs = data.cards;
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('game').style.display = 'block';
+  renderHand();
+});
+
+socket.on('handUpdate', (data) => {
+  if (data.playerId === myId) {
+    myHand = data.hand;
+    renderHand();
+  }
+});
+
+function renderHand() {
+  const handEl = document.getElementById('hand');
+  handEl.innerHTML = '';
+  myHand.forEach((cardKey, idx) => {
+    const card = cardDefs[cardKey];
+    const div = document.createElement('div');
+    div.className = 'card' + (selectedCard === idx ? ' selected' : '');
+    div.innerHTML = `
+      <div>${CARD_EMOJI[cardKey] || '❓'}</div>
+      <div class="cardName">${card.name}</div>
+      <div class="cardCost">${card.cost}</div>
+    `;
+    div.onclick = () => {
+      selectedCard = (selectedCard === idx) ? null : idx;
+      renderHand();
+    };
+    handEl.appendChild(div);
+  });
+}
+
+const battlefield = document.getElementById('battlefield');
+
+battlefield.addEventListener('click', (e) => {
+  if (selectedCard === null) return;
+  const rect = battlefield.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  const cardKey = myHand[selectedCard];
+  socket.emit('deployUnit', { cardKey, x, y });
+  selectedCard = null;
+  renderHand();
+});
+
+socket.on('stateUpdate', (data) => {
+  // Birimleri çiz
+  battlefield.innerHTML = '';
+  data.units.forEach(u => {
+    const isMine = u.owner === myId;
+    const div = document.createElement('div');
+    div.className = 'unit ' + (isMine ? 'mine' : 'theirs');
+    div.style.left = u.x + 'px';
+    div.style.top = u.y + 'px';
+    div.innerHTML = `${CARD_EMOJI[u.cardKey] || '❓'}<div class="unitHpBar"><div class="unitHpFill" style="width:${Math.max(0,(u.hp/u.maxHp*100))}%"></div></div>`;
+    battlefield.appendChild(div);
+  });
+
+  // İksir
+  const myElixir = data.elixirs[myId] || 0;
+  document.getElementById('elixirBarFill').style.width = (myElixir/10*100) + '%';
+  document.getElementById('elixirLabel').textContent = `İksir: ${myElixir.toFixed(1)}/10`;
+
+  // Kule HP
+  const myTowerHp = data.towerHps[myId] || 0;
+  const enemyTowerHp = data.towerHps[opponentId] || 0;
+  document.getElementById('myHpFill').style.width = Math.max(0, myTowerHp/1000*100) + '%';
+  document.getElementById('enemyHpFill').style.width = Math.max(0, enemyTowerHp/1000*100) + '%';
+
+  // Zaman
+  const mins = Math.floor(data.time/60);
+  const secs = data.time%60;
+  document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
+});
+
+socket.on('gameOver', (data) => {
+  const won = data.winner === myId;
+  document.getElementById('gameOverText').textContent = won ? '🏆 Kazandın!' : '💀 Kaybettin';
+  document.getElementById('gameOverScreen').style.display = 'flex';
+});
+
+socket.on('opponentLeft', () => {
+  alert('Rakip oyundan ayrıldı.');
+  location.reload();
+});
+</script>
+</body>
+  </html>
